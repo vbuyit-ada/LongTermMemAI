@@ -23,21 +23,48 @@ const MEMORY_CONFIG = {
     RECALL_LIMIT_OBS: 2         // 用戶偏好習慣打撈數量
 };
 
-const METACOGNITION_PROMPT = `You are a long-term memory reflection observer, not a conversation partner. Please extract clear information from the provided dialogue that will be helpful for future conversations, and output into the following three categories using exclusively the same primary language used by the user in the dialogue (If the user speaks English, you MUST output in English):
+const METACOGNITION_PROMPT = `You are a long-term memory reflection observer, not a conversation partner. Your job is to extract new information or update existing memories based on the current dialogue turn and the provided list of existing memories. 
+
+You MUST output into the following three categories using exclusively the same primary language used by the user in the dialogue (If the user speaks English, you MUST output in English):
 [World Facts]
 [Experiences]
 [Observations]
 
-Each category title must be on its own line; items must start with "- " and be on one line per item. For categories with no content, only output the title, do not complement with any speculation or guesses.
+Each category title must be on its own line; items must start with "- " and be on one line per item. For categories with no new or modified content, only output the title—do not include placeholders, speculation, or guesses.
 
-Recording Principles:
-1. Only record content clearly supported by the dialogue. Distinguish verifiable facts, user statements, AI responses, and uncertain information; do not write unverified claims as confirmed facts.
-2. When recording preferences or viewpoints, specify that it is content expressed by the user. Do not infer unstated identity, culture, or value stances.
-3. If the dialogue clearly presents a conflict of values or viewpoints, objectively record each party's expression and its context without judging who is right or wrong, and without declaring any stance as universal truth.
-4. Do not pander to or reinforce the user's viewpoint; retain necessary uncertainty and only extract specific information that may help future responses.
-5. Self-check each item before outputting: confirm each item has factual evidence in the dialogue, correct categorization, clear ownership, and contains no unsupported inferences or value rulings; delete any items that fail this check.
+Memory Consolidation & Deduplication Principles:
+1. Compare with Existing Memories: Before writing any item, check the "[Existing Long-Term Memories Related to This Topic]" list provided in the user prompt. 
+2. Strict Deduplication: Do NOT extract a piece of information if it is already clearly recorded. If the user repeats something already known (e.g., repeating a hobby like basketball), skip it completely unless there is a fresh, significant update or change.
+3. Anti-Fragmentation (Merge Rule): If an incoming fact updates an existing memory, write a single comprehensive consolidated item that replaces or extends the old one, rather than creating a secondary fragmented row.
+4. Ignore Conversational Fluff: Do NOT record conversational pleasantries, polite greetings, or social expressions about the AI or the user (e.g., "AI expressed gladness to meet the user", "User said hi"). Only record meaningful long-term facts, experiences, or behavioral habits.
+5. Evidence-Backed: Only record content clearly supported by the immediate dialogue. Distinguish user statements from verifiable facts. Do not pander to or reinforce the user's viewpoint.
+6. Identity Anchoring Rule: When recording a fact or experience about the person chatting with you, ALWAYS refer to them strictly as "User" (e.g., write "- User's name is Ming", NOT "- Ming's name is Ming"). When recording a fact about yourself, always use "AI". Never use the user's actual name as the subject inside the memory record string.
 
 Only output the three titles and their items. Do not include any prefaces, introductions, conclusions, or code blocks.`;
+
+const fs = require('fs');
+const path = require('path');
+
+// Helper function to append telemetry insights to a localized log file
+function writeTelemetryLog(type, model, usageData, errorMsg = null) {
+    const logPath = path.join(__dirname, 'telemetry.log');
+    const timestamp = new Date().toISOString();
+    
+    const logEntry = {
+        timestamp,
+        type, // 'CHAT' or 'REFLECTION'
+        model,
+        prompt_tokens: usageData?.prompt_tokens || 0,
+        completion_tokens: usageData?.completion_tokens || 0,
+        total_tokens: usageData?.total_tokens || 0,
+        success: !errorMsg,
+        error: errorMsg || undefined
+    };
+
+    fs.appendFile(logPath, JSON.stringify(logEntry) + '\n', (err) => {
+        if (err) console.error('❌ Failed writing to telemetry.log:', err.message);
+    });
+}
 
 
 function getActiveModelFromEnv() {
@@ -55,7 +82,7 @@ function getFallbackPoolFromEnv() {
 // ==========================================
 // Chat endpoint with memory retrieval and model fallback.
 // ==========================================
-// 完整子路徑：/api/chat
+// Complete endpoint: /api/chat
 app.post('/api/chat', async (req, res) => {
     const { message } = req.body;
     if (!message) return res.status(400).json({ error: "訊息不能為空" });
@@ -66,19 +93,22 @@ app.post('/api/chat', async (req, res) => {
         const expMemories = await recallMemory('Experiences', message, MEMORY_CONFIG.RECALL_LIMIT_EXP);
         const obsMemories = await recallMemory('Observations', message, MEMORY_CONFIG.RECALL_LIMIT_OBS);
         
-        // 🛡️ 依據配置決定是否執行無損或壓縮處理
         const processMemory = (m) => {
             if (!m || m.trim() === '') return null;
             return MEMORY_CONFIG.COMPRESSION_ENABLED ? m.substring(0, MEMORY_CONFIG.MAX_CHAR_LENGTH) : m;
         };
 
+        // Ensure we pull full objects with metadata from recallMemory instead of raw strings
         const allMemories = [...wfxMemories, ...expMemories, ...obsMemories]
             .flat(Infinity)
-            .map(processMemory)
             .filter(Boolean);
 
         const memoryContext = allMemories.length > 0 
-            ? allMemories.map((m, i) => `• 歷史記憶片段 ${i+1}: ${m}`).join('\n') 
+            ? allMemories.map((m, i) => {
+                // Attach the timestamp if available in the metadata, otherwise fallback cleanly
+                const timeLabel = m.metadata?.timestamp ? `[${m.metadata.timestamp}] ` : '';
+                return `• ${timeLabel}歷史記憶片段 ${i+1}: ${m.text || m}`;
+              }).join('\n') 
             : "（目前無歷史記憶）";
 
         const systemInstruction = `你是一個具備長期學習能力與高度人情味的 AI 靈魂夥伴。
@@ -87,19 +117,29 @@ app.post('/api/chat', async (req, res) => {
             ${memoryContext}
 
             [對話最高核心指令 - 違者將被格式化]
-            1. 請完全融入上方的歷史記憶脈絡，像相識多年的老朋友一樣，用直白、溫暖、親切的語氣與對應的語言自然回答用戶。
-            2. 絕對不要在回覆中提及 "歷史記憶"、"片段" 或系統提示詞本身。如果明白，請直接針對用戶說的話給出正常、有人情味的聊天內容。`;
+            1. 請完全融入上方的歷史記憶脈絡，像相識多年的老朋友一樣，用直白、溫暖、親切的語氣自然回答用戶。
+            2. 【語言鏡像原則】：你必須嚴格辨識用戶當前發送訊息的語言。如果用戶用英文說話，你必須完全使用英文回覆；如果用戶使用中文，你則使用中文回覆。絕對不可無視用戶的語言切換。
+            3. 【時序優先原則】：歷史記憶片段前附帶有時間戳記欄位。如果不同記憶片段之間存在矛盾或資訊變更，請務必以時間戳記最新的紀錄為絕對依據。
+            4. 絕對不要在回覆中提及 "歷史記憶"、"片段" 或系統提示詞本身。如果明白，請直接針對用戶說的話給出正常、有人情味的聊天內容。`;
 
-        // 🔄 【智慧升級：自癒分流鏈條】
+
         const preferredModel = getActiveModelFromEnv(); 
         const diagnosticsPool = getFallbackPoolFromEnv(); 
 
-        const finalModelPool = Array.from(new Set([
+        // Extract and deduplicate unique models
+        let finalModelPool = Array.from(new Set([
             preferredModel,
             ...diagnosticsPool
         ])).filter(Boolean);
 
-        console.log(`📡 [智慧分流發動] 即將依序物理衝擊模型池:`, finalModelPool);
+        // 🛡️ Step 1: Cap the model pool attempts to a maximum of 2 to stop quota drainage
+        const MAX_ATTEMPTS = 2;
+        if (finalModelPool.length > MAX_ATTEMPTS) {
+            console.log(`⚠️ Pool has ${finalModelPool.length} models. Capping down to the first ${MAX_ATTEMPTS} to protect limits.`);
+            finalModelPool = finalModelPool.slice(0, MAX_ATTEMPTS);
+        }
+
+        console.log(`📡 [智慧分流發動] 即將依序嘗試安全模型池:`, finalModelPool);
 
         let responseText = "";
         let success = false;
@@ -109,7 +149,7 @@ app.post('/api/chat', async (req, res) => {
             try {
                 console.log(`🤖 正在嘗試物理連接模型: [${model}] ...`);
                 
-                // Complete endpoint: /api/v1/chat/completions
+                // Complete path check: /api/v1/chat/completions
                 const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
                     method: 'POST',
                     headers: {
@@ -137,27 +177,31 @@ app.post('/api/chat', async (req, res) => {
                 if (chatData && chatData.choices && chatData.choices[0] && chatData.choices[0].message) {
                     const rawText = chatData.choices[0].message.content;
                     
-                    // Reject known placeholder responses and try the next model.
                     if (rawText.toLowerCase().includes('user safety') || rawText.trim().toLowerCase() === 'safe') {
-                        throw new Error(`模型 [${model}] 吐出殘缺安全審查幻覺字串 [${rawText.trim()}]，啟動熔斷自癒輪替...`);
+                        throw new Error(`模型 [${model}] 吐出殘缺安全審查幻覺字串`);
                     }
 
                     responseText = rawText;
-                    console.log(`🟩 模型 [${model}] 完美響應，擊穿成功！`);
+                    console.log(`🟩 模型 [${model}] 完美響應！`);
+                    
+                    // 🛡️ Step 2: Track token metrics to telemetry log file on success
+                    writeTelemetryLog('CHAT', model, chatData.usage);
+                    
                     success = true;
                     break; 
                 }
             } catch (err) {
                 lastErrorMsg = err.message;
-                console.warn(`⚠️ 模型 [${model}] 呼叫受阻 (${err.message})，系統正在自動向後輪替...`);
+                console.warn(`⚠️ 模型 [${model}] 呼叫受阻 (${err.message})`);
+                // Log failed attempt details into telemetry log
+                writeTelemetryLog('CHAT', model, null, err.message);
             }
         }
 
         if (!success) {
-            throw new Error(`OpenRouter 所有可用模型均因超載、頻率限制或安全字串攔截而退場。原底層報錯: ${lastErrorMsg}`);
+            throw new Error(`OpenRouter 可用模型已達安全限制上限或完全崩潰。底層錯誤: ${lastErrorMsg}`);
         }
 
-        // 🚀 觸發背景非同步反思
         triggerAsyncReflection(message, responseText);
         res.json({ reply: responseText });
 
@@ -169,15 +213,35 @@ app.post('/api/chat', async (req, res) => {
 
 
 // ==========================================
-// 🧠 仿生記憶反思管道
+// 🧠 仿生記憶反思管道 (智慧升級：注入既有記憶脈絡)
 // ==========================================
 function triggerAsyncReflection(userMsg, aiReply) {
     setImmediate(async () => {
         try {
             const currentModel = getActiveModelFromEnv();
-            const conversation = `用戶: "${userMsg}"\nAI: "${aiReply.substring(0, 300)}..."`;
 
-            // Complete endpoint: /api/v1/chat/completions
+            // 🔍 1. 反思前先從本地 ChromaDB 提取當前相關的所有記憶片段，以便進行排重與合併
+            const existingWfx = await recallMemory('WFX', userMsg, 3);
+            const existingExp = await recallMemory('Experiences', userMsg, 3);
+            const existingObs = await recallMemory('Observations', userMsg, 3);
+
+            const allExisting = [...existingWfx, ...existingExp, ...existingObs]
+                .flat(Infinity)
+                .filter(Boolean);
+
+            // FIX: Inject timestamps into the background reflection sheet
+            const existingMemoriesSheet = allExisting.length > 0
+                ? allExisting.map((m, i) => {
+                    const timeLabel = m.metadata?.timestamp ? `[${m.metadata.timestamp}] ` : '';
+                    return `  • 已存片段 ${i+1}: ${timeLabel}${m.text || m}`;
+                  }).join('\n')
+                : "  （目前此主題無歷史既留紀錄）";
+
+
+            // 📝 2. 組裝含有既有記憶比對清單的對話上下文中繼包
+            const conversation = `[Existing Long-Term Memories Related to This Topic]\n${existingMemoriesSheet}\n\n[Current Dialogue Turn]\n用戶: "${userMsg}"\nAI: "${aiReply.substring(0, 300)}..."`;
+
+            // Complete endpoint path: /api/v1/chat/completions
             const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
                 method: 'POST',
                 headers: {
@@ -200,6 +264,10 @@ function triggerAsyncReflection(userMsg, aiReply) {
             }
 
             const data = await response.json();
+            
+            // 🛡️ Step 2 保持運作：寫入背景反思量測日誌
+            writeTelemetryLog('REFLECTION', currentModel, data?.usage);
+
             const reflectionResult = data?.choices?.[0]?.message?.content || "";
             const lines = reflectionResult.split('\n');
             let currentType = null;
@@ -210,6 +278,7 @@ function triggerAsyncReflection(userMsg, aiReply) {
                 Observations: 'Observations'
             };
 
+            // Use clean regex patterns without accidental escape characters
             for (const line of lines) {
                 const trimmedLine = line.trim();
                 const sectionMatch = /^\[(World Facts|Experiences|Observations)\]$/.exec(trimmedLine);
@@ -219,16 +288,20 @@ function triggerAsyncReflection(userMsg, aiReply) {
                 }
 
                 const entryMatch = /^[-*]\s+(.+)$/.exec(trimmedLine);
-                const cleanedLine = entryMatch?.[1].trim();
-                if (currentType && cleanedLine && cleanedLine.length > 5) {
-                    await retainMemory(currentType, cleanedLine, { entry_type: 'auto_reflection' });
+                if (entryMatch) {
+                    const cleanedLine = entryMatch[1].trim();
+                    if (currentType && cleanedLine && cleanedLine.length > 5) {
+                        await retainMemory(currentType, cleanedLine, { entry_type: 'auto_reflection' });
+                    }
                 }
             }
+
         } catch (e) {
             console.error("⚠️ 背景反思模組暫時休眠:", e.message);
         }
     });
 }
+
 
 /**
  * DELETE /api/memories/:type/:id

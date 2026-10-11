@@ -12,7 +12,26 @@
 - 聊天成功後，在背景反思對話並嘗試儲存記憶。
 - Crystal 記憶主控台可檢視、刪除單筆記憶或要求清除全部記憶。
 
-## 專案檔案
+## 🛠️ 近期重大架構優化進展 (Recent Progress)
+
+為了徹底解決 Free-tier 模型的流量耗盡、記憶冗餘、以及多語言和身份錯亂問題，專案最近完成了以下四項核心底層升級：
+
+1. **配額與分流熔斷保護 (Token Telemetry & Failover Throttling)**
+   - 引入了本地自動化追蹤文件 `telemetry.log`，精準記錄每次對話（CHAT）與記憶反思（REFLECTION）所消耗的 Prompt、Completion 與 Total Tokens。
+   - 限制了 `server.js` 中備援模型池（Failover Loop）的無休止嘗試。目前最高限制只嘗試 2 個模型，遇到崩潰或安全字串立即熔斷，防止單次對話瞬間燒光每日 50 次的 API 額度。
+
+2. **雙層混合式記憶排重防線 (Dual-Layer Deduplication Guard)**
+   - **語意層 Prompt 限制**：在 `METACOGNITION_PROMPT` 中新增原則，強制 AI 忽略問候語、社交客套話（Conversational Fluff），且重複提及已知興趣（如籃球、牛排）時不進行重寫。
+   - **二進位字串比對門檻（JavaScript Runtime Gate）**：在寫入 ChromaDB 之前，本地程式碼會使用不分大小寫與標點符號的 fuzzy 匹配，掃描當前打撈到的既有記憶數組。若發現相似或包含關係的重複條目，直接在 Gateway 攔截並放棄寫入，完美阻斷重複生成的紀錄爆炸。
+
+3. **人稱身份錨定與時間序列優先 (Identity Anchoring & Temporal Priority)**
+   - **身份錨定原則**：修正了原本會生成「Ming 喜歡牛排」這種令人困惑的第三人稱幽靈 loops，強制 AI 將記憶主體統一規範為 `User`（用戶）與 `AI`（夥伴）。
+   - **時序脈絡注入**：在打撈記憶並注入 System Prompt 時，程式會自動提取 ChromaDB 內的 `timestamp`  metadata。當不同時間點的記憶發生矛盾時（例如過去喜歡牛排，現在討厭牛排並喜歡披薩），AI 能透過時間戳記長幼判定，以最新的紀錄為唯一真理，實現全自動的「記憶覆寫與進化」認知。
+
+4. **動態語言鏡像感知 (Dynamic Language Mirroring)**
+   - 移除了硬編碼的語言鎖定，在系統提示詞中植入【語言鏡像原則】。AI 不再受到漫長歷史上下文或初始提示詞的語言干擾，能夠 100% 靈敏地鏡像感知用戶當前發送訊息的語言（英文發問則英文回覆，中文發問則中文回覆）。
+
+## 专案档案
 
 ```text
 LongTermMemAI/
@@ -121,9 +140,21 @@ node test-api.js
 | 讀取集合記憶 | `POST` | `/tenants/{tenant}/databases/{database}/collections/{collectionId}/get` |
 | 刪除記憶 | `POST` | `/tenants/{tenant}/databases/{database}/collections/{collectionId}/delete` |
 
-## 注意事項
+## 注意事項與未來發展規劃 (What's Next)
 
 - 本專案目前沒有定義 `npm test` 或 build 指令。
 - ChromaDB 的執行方式及 Docker 映像版本不由本專案固定。
 - ChromaDB `/get` 操作會將各類別集合記憶載入主控台；資料量大時會增加回應及瀏覽器負擔。
 - 聊天介面載入 Tailwind CSS、字型、Markdown 解析器及程式碼高亮等外部 CDN 資源。
+- 最後希望可以在LongMemEval benchmark造行評分。
+
+### 🚀 建議的下一步優化藍圖 (Proposed Future Roadmap)
+
+1. **建立自動化評估基準（Evaluation Suite / LongMemEval 模擬）**
+   - 撰寫一個獨立的 `test-longmemeval.js` 腳本，加載標準的多輪對話測試集，自動流式發送給 `/api/chat`，測試記憶在極長跨度下的留存、衝突處理與事實檢索準確率，為專案產出可量化的效能分數報告。
+
+2. **打撈閾值與動態 K 值最佳化（Dynamic K-Nearest Recall Tuning）**
+   - 目前 `RECALL_LIMIT` 是硬編碼的靜態數字。當資料庫增長到上千條記憶時，靜態打撈容易造成上下文污染。後續可研究引入基於相似度分數（Distance Score Threshold）的過濾機制，只有大於 0.6 相似度的核心記憶才允許注入 Prompt。
+
+3. **內存快取層與資料庫異步批次寫入（In-Memory Telemetry Cache）**
+   - 目前的 `telemetry.log` 採用每次對話直接物理 I/O `fs.appendFile` 寫入。在高併發情況下容易造成磁碟阻塞。未來可優化為內存緩衝區快取（In-Memory Cache Pool），定時或定量非同步批次沖刷（Flush）至磁碟。
