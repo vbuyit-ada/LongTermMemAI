@@ -1,3 +1,5 @@
+![LongTermMemAI Console Preview](./2026-10-11_20h23_43.png)
+
 # LongTermMemAI
 
 以 Express 提供的長期記憶聊天應用程式。伺服器透過 OpenRouter 產生聊天回覆，使用 ChromaDB v2 儲存及檢索記憶，並使用 `@xenova/transformers` 在本機產生文字 embedding。
