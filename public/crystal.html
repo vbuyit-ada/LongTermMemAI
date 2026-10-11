@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔮 ChromaDB 記憶體水晶球監控面板</title>
+    <style>
+        :root {
+            --bg-dark: #121214;
+            --card-bg: #1e1e24;
+            --text-main: #e2e8f0;
+            --text-muted: #94a3b8;
+            --wfx-color: #38bdf8;
+            --exp-color: #fbbf24;
+            --obs-color: #34d399;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            margin: 0;
+            padding: 24px;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #2d2d34;
+            padding-bottom: 16px;
+            margin-bottom: 24px;
+        }
+        h1 { margin: 0; font-size: 24px; font-weight: 600; }
+        .btn-refresh {
+            background-color: #4f46e5;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        .btn-refresh:hover { background-color: #4338ca; }
+        .panel-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 24px;
+        }
+        .column {
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+            border-top: 4px solid var(--text-muted);
+        }
+        .column.wfx { border-top-color: var(--wfx-color); }
+        .column.experiences { border-top-color: var(--exp-color); }
+        .column.observations { border-top-color: var(--obs-color); }
+        
+        .column-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        .column-title { font-size: 18px; font-weight: 600; margin: 0; }
+        .badge {
+            background: #2d2d34;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+        }
+        .memory-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        .memory-card {
+            background-color: #272730;
+            border-radius: 8px;
+            padding: 12px;
+            border: 1px solid #33333f;
+        }
+        .memory-text { font-size: 14px; line-height: 1.5; margin: 0 0 8px 0; word-break: break-all; }
+        .memory-meta {
+            font-size: 11px;
+            color: var(--text-muted);
+            display: flex;
+            justify-content: space-between;
+        }
+        .status-msg {
+            text-align: center;
+            color: var(--text-muted);
+            padding: 20px;
+            font-style: italic;
+        }
+        /* 追加刪除按鈕樣式 */
+        .memory-card {
+            position: relative; /* 讓刪除按鈕可以絕對定位在右上角 */
+            padding-right: 36px; /* 保留右側空間防止文字重疊 */
+        }
+        .btn-delete {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: transparent;
+            color: var(--text-muted);
+            border: none;
+            font-size: 14px;
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+        .btn-delete:hover {
+            color: #ef4444;
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+    </style>
+</head>
+<body>
+
+    <header>
+        <div>
+            <h1>🔮 Hindsight長期記憶體水晶球監控面板</h1>
+            <p style="color: var(--text-muted); margin: 4px 0 0 0; font-size: 14px;">即時監控 Docker 內部 ChromaDB V2 的記憶存儲狀態</p>
+        </div>
+        <button id="refreshBtn" class="btn-refresh">物理重新整理打撈</button>
+    </header>
+
+    <main class="panel-container">
+        <!-- World Facts 區塊 -->
+        <section class="column wfx">
+            <div class="column-header">
+                <h2 class="column-title" style="color: var(--wfx-color)">🌐 World Facts (WFX)</h2>
+                <span id="count-wfx" class="badge">0</span>
+            </div>
+            <div id="list-wfx" class="memory-list">
+                <div class="status-msg">等待物理打撈...</div>
+            </div>
+        </section>
+
+        <!-- Experiences 區塊 -->
+        <section class="column experiences">
+            <div class="column-header">
+                <h2 class="column-title" style="color: var(--exp-color)">🧠 Experiences</h2>
+                <span id="count-experiences" class="badge">0</span>
+            </div>
+            <div id="list-experiences" class="memory-list">
+                <div class="status-msg">等待物理打撈...</div>
+            </div>
+        </section>
+
+        <!-- Observations 區塊 -->
+        <section class="column observations">
+            <div class="column-header">
+                <h2 class="column-title" style="color: var(--obs-color)">👁️ Observations</h2>
+                <span id="count-observations" class="badge">0</span>
+            </div>
+            <div id="list-observations" class="memory-list">
+                <div class="status-msg">等待物理打撈...</div>
+            </div>
+        </section>        
+    </main>
+    <!-- 貼在 refreshBtn 的右邊 -->
+    <button id="wipeBtn" class="btn-refresh" style="background-color: #dc2626; margin-left: 4px;">🚨 一鍵格式化大腦</button>
+
+    <!-- 載入專屬的前端渲染邏輯 JS -->
+    <script src="crystal.js"></script>
+</body>
+</html>
