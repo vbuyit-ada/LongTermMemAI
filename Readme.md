@@ -1,4 +1,4 @@
-# OpenRouter Hindsight Chat
+# LongTermMemAI
 
 以 Express 提供的長期記憶聊天應用程式。伺服器透過 OpenRouter 產生聊天回覆，使用 ChromaDB v2 儲存及檢索記憶，並使用 `@xenova/transformers` 在本機產生文字 embedding。
 
@@ -15,10 +15,9 @@
 ## 專案檔案
 
 ```text
-openrouter-hindsight-chat/
-├── .env                  # 本機設定與金鑰，不納入 Git
+LongTermMemAI/
 ├── .gitignore
-├── AGENTS.md             # AI 程式碼修改規範
+├── Readme.md
 ├── memory-engine.js      # 本機 embedding 與 ChromaDB 記憶操作
 ├── package.json          # 專案依賴
 ├── package-lock.json
@@ -32,7 +31,7 @@ openrouter-hindsight-chat/
     └── crystal.js        # 主控台的記憶載入與管理操作
 ```
 
-`node_modules/` 和 `.env` 已列入 `.gitignore`。
+`.env` 是本機設定檔，請依下方說明自行建立；它和 `node_modules/` 均已列入 `.gitignore`，不會提交至 Git。
 
 ## 需求
 
