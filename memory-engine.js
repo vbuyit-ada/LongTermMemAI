@@ -114,7 +114,7 @@ async function retainMemory(memoryType, content, tags = {}) {
 /**
  * Hindsight RECALL: 物理提取查詢向量，並透過 v2 API 在 Docker 內執行跨時空幾何比對
  */
-async function recallMemory(memoryType, queryText, limit = 3) {
+async function recallMemory(memoryType, queryText, limit = 3, { throwOnError = false } = {}) {
     console.log(`📡 [HTTP v2 API Engine] recallMemory 觸發！類型: [${memoryType}]`);
     try {
         const collectionId = await getCollectionIdViaAPI(memoryType);
@@ -135,14 +135,28 @@ async function recallMemory(memoryType, queryText, limit = 3) {
 
         const results = await response.json();
         
-        if (results && results.documents && Array.isArray(results.documents)) {
-            const flattenedDocs = results.documents.flat(Infinity).filter(Boolean);
-            console.log(`🔍 [API Recall 診斷] 實體打撈到 ${flattenedDocs.length} 條記憶碎片！`);
-            return flattenedDocs;
+        if (!results || !Array.isArray(results.documents) || !Array.isArray(results.documents[0])) {
+            if (throwOnError) throw new Error(`Invalid ChromaDB query response for ${memoryType}: missing documents`);
+            return [];
         }
-        return [];
+
+        const documents = results.documents[0];
+        const ids = results.ids?.[0] || [];
+        const metadatas = results.metadatas?.[0] || [];
+        const distances = results.distances?.[0] || [];
+        const memories = documents.flatMap((text, index) => text ? [{
+            id: ids[index] || null,
+            text,
+            metadata: metadatas[index] || {},
+            timestamp: metadatas[index]?.timestamp || null,
+            distance: distances[index] ?? null
+        }] : []);
+
+        console.log(`🔍 [API Recall 診斷] 實體打撈到 ${memories.length} 條記憶碎片！`);
+        return memories;
     } catch (error) {
         console.error(`❌ [Local API Recall 潰退] Failed for ${memoryType}:`, error.message);
+        if (throwOnError) throw error;
         return [];
     }
 }

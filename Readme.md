@@ -22,14 +22,16 @@
 
 2. **雙層混合式記憶排重防線 (Dual-Layer Deduplication Guard)**
    - **語意層 Prompt 限制**：在 `METACOGNITION_PROMPT` 中新增原則，強制 AI 忽略問候語、社交客套話（Conversational Fluff），且重複提及已知興趣（如籃球、牛排）時不進行重寫。
-   - **二進位字串比對門檻（JavaScript Runtime Gate）**：在寫入 ChromaDB 之前，本地程式碼會使用不分大小寫與標點符號的 fuzzy 匹配，掃描當前打撈到的既有記憶數組。若發現相似或包含關係的重複條目，直接在 Gateway 攔截並放棄寫入，完美阻斷重複生成的紀錄爆炸。
+   - **文字近似排重檢查（JavaScript Runtime Gate）**：寫入前會在同類別的 ChromaDB 集合中檢索最多 10 條候選記憶，忽略大小寫、標點及空白後，略過正規化文字相同或字元 bigram Dice 相似度至少 0.90 的條目。短於 20 字元的內容只做正規化完全比對；極性詞不同時不以模糊比對判定重複。這是盡力而為的文字近似檢查，不保證能識別所有語意重複；若檢索失敗，該條記憶不會寫入。
 
 3. **人稱身份錨定與時間序列優先 (Identity Anchoring & Temporal Priority)**
    - **身份錨定原則**：修正了原本會生成「Ming 喜歡牛排」這種令人困惑的第三人稱幽靈 loops，強制 AI 將記憶主體統一規範為 `User`（用戶）與 `AI`（夥伴）。
-   - **時序脈絡注入**：在打撈記憶並注入 System Prompt 時，程式會自動提取 ChromaDB 內的 `timestamp`  metadata。當不同時間點的記憶發生矛盾時（例如過去喜歡牛排，現在討厭牛排並喜歡披薩），AI 能透過時間戳記長幼判定，以最新的紀錄為唯一真理，實現全自動的「記憶覆寫與進化」認知。
+   - **時序脈絡注入**：ChromaDB 查詢會回傳記憶文字及 metadata；聊天和反思上下文會在有時間戳時附上 ISO 時間並明確標示 `UTC`。模型會被提示優先考慮較新的相關記憶，但檢索結果有限，時間判斷仍屬模型行為，不保證自動解決所有衝突。
 
 4. **動態語言鏡像感知 (Dynamic Language Mirroring)**
    - 移除了硬編碼的語言鎖定，在系統提示詞中植入【語言鏡像原則】。AI 不再受到漫長歷史上下文或初始提示詞的語言干擾，能夠 100% 靈敏地鏡像感知用戶當前發送訊息的語言（英文發問則英文回覆，中文發問則中文回覆）。
+
+聊天提示中的記憶文字壓縮由 `server.js` 的 `MEMORY_CONFIG` 控制。預設 `COMPRESSION_ENABLED` 為 `false`；設為 `true` 時，僅將提供給聊天模型的每筆檢索記憶截斷至 `MAX_CHAR_LENGTH`（目前為 150 個 UTF-16 code units），不會改寫 ChromaDB 中儲存的原文。
 
 ## 专案档案
 
@@ -38,12 +40,14 @@ LongTermMemAI/
 ├── .gitignore
 ├── Readme.md
 ├── memory-engine.js      # 本機 embedding 與 ChromaDB 記憶操作
+├── memory-deduplication.js # 記憶文字近似排重
 ├── package.json          # 專案依賴
 ├── package-lock.json
 ├── server.js             # Express 伺服器、聊天與記憶管理 API
 ├── test-api.js           # 探測 OpenRouter 模型並更新備援模型設定
 ├── test-chroma-api.js    # 測試 ChromaDB heartbeat
 ├── test-hf.js            # 測試本機 Transformers.js embedding
+├── test-memory-deduplication.js # 測試記憶近似排重
 └── public/
     ├── index.html        # 聊天介面
     ├── crystal.html      # 記憶管理主控台
@@ -94,9 +98,12 @@ node server.js
 
 ## 探測工具
 
-以下是手動執行的探測腳本，不是自動化測試套件：
+以下是可手動執行的測試及探測腳本；本專案尚未設定完整的自動化測試套件：
 
 ```bash
+# 測試記憶文字近似排重
+node test-memory-deduplication.js
+
 # 測試本機 embedding；首次執行可能下載模型
 node test-hf.js
 
@@ -111,7 +118,7 @@ node test-api.js
 
 ## 聊天與記憶流程
 
-`POST /api/chat` 依序從 `WFX`、`Experiences` 和 `Observations` 集合檢索記憶，將結果提供給主要模型及備援模型。聊天回覆成功後，背景反思會再呼叫 OpenRouter，依 `[World Facts]`、`[Experiences]` 和 `[Observations]` 分類輸出，並嘗試將條目寫入 ChromaDB。背景反思不會阻塞聊天回應；若記憶引擎或反思失敗，伺服器會記錄錯誤。
+`POST /api/chat` 依序從 `WFX`、`Experiences` 和 `Observations` 集合檢索記憶，將文字、metadata 及可用的 UTC timestamp 提供給主要模型及備援模型。聊天回覆成功後，背景反思會再呼叫 OpenRouter，依 `[World Facts]`、`[Experiences]` 和 `[Observations]` 分類輸出，並嘗試將條目寫入 ChromaDB。寫入每筆反思記憶前，程式會在同一類別檢索最多 10 筆候選項目，套用文字近似排重檢查；若此檢查的 ChromaDB 查詢失敗，該次背景反思流程會中止，不會寫入該候選。此檢查不會刪除或合併已存在的記憶，也無法保證辨識跨類別重複或不同措辭的語意重複。背景反思不會阻塞聊天回應；若記憶引擎或反思失敗，伺服器會記錄錯誤。
 
 記憶向量由本機 `@xenova/transformers` 套件產生；OpenRouter 用於聊天及背景反思，不用於產生 embedding。
 

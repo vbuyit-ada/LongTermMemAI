@@ -1,5 +1,6 @@
 const express = require('express');
 const { retainMemory, recallMemory, fetchAllMemoriesRaw, deleteMemoryById } = require('./memory-engine');
+const { isLikelyDuplicate } = require('./memory-deduplication');
 
 require('dotenv').config();
 
@@ -93,21 +94,20 @@ app.post('/api/chat', async (req, res) => {
         const expMemories = await recallMemory('Experiences', message, MEMORY_CONFIG.RECALL_LIMIT_EXP);
         const obsMemories = await recallMemory('Observations', message, MEMORY_CONFIG.RECALL_LIMIT_OBS);
         
-        const processMemory = (m) => {
-            if (!m || m.trim() === '') return null;
-            return MEMORY_CONFIG.COMPRESSION_ENABLED ? m.substring(0, MEMORY_CONFIG.MAX_CHAR_LENGTH) : m;
-        };
-
-        // Ensure we pull full objects with metadata from recallMemory instead of raw strings
         const allMemories = [...wfxMemories, ...expMemories, ...obsMemories]
             .flat(Infinity)
-            .filter(Boolean);
+            .filter(memory => memory && typeof memory.text === 'string' && memory.text.trim())
+            .map(memory => ({
+                ...memory,
+                text: MEMORY_CONFIG.COMPRESSION_ENABLED
+                    ? memory.text.substring(0, MEMORY_CONFIG.MAX_CHAR_LENGTH)
+                    : memory.text
+            }));
 
         const memoryContext = allMemories.length > 0 
             ? allMemories.map((m, i) => {
-                // Attach the timestamp if available in the metadata, otherwise fallback cleanly
-                const timeLabel = m.metadata?.timestamp ? `[${m.metadata.timestamp}] ` : '';
-                return `• ${timeLabel}歷史記憶片段 ${i+1}: ${m.text || m}`;
+                const timeLabel = m.timestamp ? `[${m.timestamp} UTC] ` : '';
+                return `• ${timeLabel}歷史記憶片段 ${i+1}: ${m.text}`;
               }).join('\n') 
             : "（目前無歷史記憶）";
 
@@ -232,8 +232,8 @@ function triggerAsyncReflection(userMsg, aiReply) {
             // FIX: Inject timestamps into the background reflection sheet
             const existingMemoriesSheet = allExisting.length > 0
                 ? allExisting.map((m, i) => {
-                    const timeLabel = m.metadata?.timestamp ? `[${m.metadata.timestamp}] ` : '';
-                    return `  • 已存片段 ${i+1}: ${timeLabel}${m.text || m}`;
+                    const timeLabel = m.timestamp ? `[${m.timestamp} UTC] ` : '';
+                    return `  • 已存片段 ${i+1}: ${timeLabel}${m.text}`;
                   }).join('\n')
                 : "  （目前此主題無歷史既留紀錄）";
 
@@ -291,6 +291,18 @@ function triggerAsyncReflection(userMsg, aiReply) {
                 if (entryMatch) {
                     const cleanedLine = entryMatch[1].trim();
                     if (currentType && cleanedLine && cleanedLine.length > 5) {
+                        const existingMemories = await recallMemory(currentType, cleanedLine, 10, {
+                            throwOnError: true
+                        });
+                        const isDuplicate = existingMemories.some(existing =>
+                            isLikelyDuplicate(cleanedLine, existing.text)
+                        );
+
+                        if (isDuplicate) {
+                            console.log(`⏭️ Skipping likely duplicate memory in ${currentType}.`);
+                            continue;
+                        }
+
                         await retainMemory(currentType, cleanedLine, { entry_type: 'auto_reflection' });
                     }
                 }
