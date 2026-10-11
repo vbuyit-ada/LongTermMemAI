@@ -3,7 +3,7 @@ require('dotenv').config();
 // ChromaDB v2 API 基礎路徑與環境變數配置
 const CHROMA_BASE_URL = process.env.CHROMA_BASE_URL;
 const CHROMA_TENANT_UUID = process.env.CHROMA_TENANT_UUID;
-const CHROMA_COLLECTION_PREFIX = process.env.CHROMA_COLLECTION_PREFIX || "hindsight_or_";
+const CHROMA_COLLECTION_PREFIX = process.env.CHROMA_COLLECTION_PREFIX || "Long Term Memory_or_";
 
 // 預設的記憶集合核心清單
 const TARGET_CATEGORIES = ['wfx', 'experiences', 'observations'];
@@ -81,7 +81,7 @@ async function getCollectionIdViaAPI(categoryName) {
 }
 
 /**
- * Hindsight RETAIN: 物理提取本地向量，並透過 v2 API 寫入 Docker 純向量儲存區
+ * Long Term Memory RETAIN: 物理提取本地向量，並透過 v2 API 寫入 Docker 純向量儲存區
  */
 async function retainMemory(memoryType, content, tags = {}) {
     console.log(`📡 [HTTP v2 API Engine] retainMemory 觸發！類型: [${memoryType}]`);
@@ -112,7 +112,7 @@ async function retainMemory(memoryType, content, tags = {}) {
 }
 
 /**
- * Hindsight RECALL: 物理提取查詢向量，並透過 v2 API 在 Docker 內執行跨時空幾何比對
+ * Long Term Memory RECALL: 物理提取查詢向量，並透過 v2 API 在 Docker 內執行跨時空幾何比對
  */
 async function recallMemory(memoryType, queryText, limit = 3, { throwOnError = false } = {}) {
     console.log(`📡 [HTTP v2 API Engine] recallMemory 觸發！類型: [${memoryType}]`);

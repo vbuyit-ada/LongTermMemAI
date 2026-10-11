@@ -405,4 +405,4 @@ app.get('/api/memories', async (req, res) => {
     }
 });
 
-app.listen(PORT, () => console.log(`🚀 Hindsight 系統 (OpenRouter 核心版) 正於 ${APP_HOST.origin} 守護記憶...`));
+app.listen(PORT, () => console.log(`🚀 Long Term Memory 系統 (OpenRouter 核心版) 正於 ${APP_HOST.origin} 守護記憶...`));

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OpenRouter Hindsight Chat — 長期記憶聊天面板</title>
+    <title>長期記憶聊天面板</title>
     <!-- 🪐 極客風必備：Google Fonts 科技感字體與 TailwindCSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
@@ -65,14 +65,14 @@
         <div class="flex items-center space-x-3">
             <span class="text-2xl">🚀</span>
             <div>
-                <h1 class="text-lg font-bold text-white tracking-wide">Hindsight Chat</h1>
+                <h1 class="text-lg font-bold text-white tracking-wide">Long Term Memory Chat</h1>
                 <p class="text-xs text-gray-400">OpenRouter 長期記憶對話系統</p>
             </div>
         </div>
         <!-- 記憶體水晶球入口橋樑 -->
         <div class="crystal-portal-zone" style="margin: 10px 0; padding: 10px; border-radius: 8px; background: rgba(79, 70, 229, 0.1); border: 1px solid rgba(79, 70, 229, 0.2);">
             <a href="crystal.html" target="_blank" style="display: inline-flex; align-items: center; gap: 8px; color: #818cf8; text-decoration: none; font-weight: 500; font-size: 14px; transition: color 0.2s;">
-                <span>🔮 開啟 Hindsight 記憶體水晶球監控面板</span>
+                <span>🔮 開啟 Long Term Memory 記憶體水晶球監控面板</span>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
             </a>
         </div>
@@ -184,7 +184,7 @@
                 const targetBubble = document.getElementById(thinkingNodeId);
                 if (targetBubble) targetBubble.remove();
                 
-                appendMessage('system-error', `通訊失敗：無法連接至 Hindsight 後端。請檢查後端 Terminal 狀態。(${error.message})`);
+                appendMessage('system-error', `通訊失敗：無法連接至 Long Term Memory 後端。請檢查後端 Terminal 狀態。(${error.message})`);
             }
         }
 

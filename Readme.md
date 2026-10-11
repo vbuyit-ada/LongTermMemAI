@@ -2,7 +2,7 @@
 
 以 Express 提供的長期記憶聊天應用程式。伺服器透過 OpenRouter 產生聊天回覆，使用 ChromaDB v2 儲存及檢索記憶，並使用 `@xenova/transformers` 在本機產生文字 embedding。
 
-本專案的長期記憶設計概念受到 [Hindsight](https://github.com/vectorize-io/hindsight) 啟發；本專案使用自己的程式碼與技術架構實作。
+本專案的長期記憶設計概念受到 [Long Term Memory](https://github.com/vectorize-io/Long Term Memory) 啟發；本專案使用自己的程式碼與技術架構實作。
 
 ## 功能
 
