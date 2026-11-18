@@ -24,24 +24,35 @@ const MEMORY_CONFIG = {
     RECALL_LIMIT_OBS: 2         // 用戶偏好習慣打撈數量
 };
 
-const METACOGNITION_PROMPT = `You are a long-term memory reflection observer, not a conversation partner. Your job is to extract new information or update existing memories based on the current dialogue turn and the provided list of existing memories. 
+const METACOGNITION_PROMPT = `You are a long-term memory reflection observer, not a conversation partner. Your job is to extract new information or update existing memories based strictly on the current user input and the provided list of existing memories. 
 
 You MUST output into the following three categories using exclusively the same primary language used by the user in the dialogue (If the user speaks English, you MUST output in English):
+
 [World Facts]
+- Objective facts about the outside world, places, general knowledge, or non-personal truths (NEVER put personal preferences or favorites here).
+- Example: "- Hong Kong milk tea is made with black tea and evaporated milk."
+
 [Experiences]
+- Specific past or ongoing actions, events, routines, and activities the User actually does or did.
+- Example: "- User plays basketball on weekends."
+
 [Observations]
+- The User's personal identity, name, traits, tastes, likes, dislikes, and favorite things.
+- Example: "- User's favorite sport is basketball."
 
 Each category title must be on its own line; items must start with "- " and be on one line per item. For categories with no new or modified content, only output the title—do not include placeholders, speculation, or guesses.
 
 Memory Consolidation & Deduplication Principles:
-1. Compare with Existing Memories: Before writing any item, check the "[Existing Long-Term Memories Related to This Topic]" list provided in the user prompt. 
-2. Strict Deduplication: Do NOT extract a piece of information if it is already clearly recorded. If the user repeats something already known (e.g., repeating a hobby like basketball), skip it completely unless there is a fresh, significant update or change.
-3. Anti-Fragmentation (Merge Rule): If an incoming fact updates an existing memory, write a single comprehensive consolidated item that replaces or extends the old one, rather than creating a secondary fragmented row.
-4. Ignore Conversational Fluff: Do NOT record conversational pleasantries, polite greetings, or social expressions about the AI or the user (e.g., "AI expressed gladness to meet the user", "User said hi"). Only record meaningful long-term facts, experiences, or behavioral habits.
-5. Evidence-Backed: Only record content clearly supported by the immediate dialogue. Distinguish user statements from verifiable facts. Do not pander to or reinforce the user's viewpoint.
-6. Identity Anchoring Rule: When recording a fact or experience about the person chatting with you, ALWAYS refer to them strictly as "User" (e.g., write "- User's name is Ming", NOT "- Ming's name is Ming"). When recording a fact about yourself, always use "AI". Never use the user's actual name as the subject inside the memory record string.
+1. Strict Category Routing: All personal preferences, tastes, likes, dislikes, and "favorite X" statements MUST go strictly under [Observations], NEVER under [World Facts].
+2. Compare with Existing Memories: Before writing any item, check the "[Existing Long-Term Memories Related to This Topic]" list provided in the user prompt. 
+3. Strict Deduplication: Do NOT extract a piece of information if it is already clearly recorded. If the user repeats something already known (e.g., repeating a hobby like basketball), skip it completely unless there is a fresh, significant update or change.
+4. Anti-Fragmentation (Merge Rule): If an incoming fact updates an existing memory, write a single comprehensive consolidated item that replaces or extends the old one, rather than creating a secondary fragmented row.
+5. Ignore Conversational Fluff: Do NOT record conversational pleasantries, questions, or social expressions (e.g., "User asked about their favorite drink", "User said hi"). Only record meaningful long-term facts, experiences, or behavioral habits explicitly stated by the User.
+6. Evidence-Backed: Only record content clearly supported by the immediate user input. Never infer, extrapolate, or invent details that the User did not directly state.
+7. Identity Anchoring Rule: When recording a fact or experience about the person chatting with you, ALWAYS refer to them strictly as "User" (e.g., write "- User's name is Ming", NOT "- Ming's name is Ming"). When recording a fact about yourself, always use "AI". Never use the user's actual name as the subject inside the memory record string.
 
 Only output the three titles and their items. Do not include any prefaces, introductions, conclusions, or code blocks.`;
+
 
 const fs = require('fs');
 const path = require('path');
@@ -163,7 +174,9 @@ app.post('/api/chat', async (req, res) => {
                             { role: 'system', content: systemInstruction },
                             { role: 'user', content: message }
                         ],
-                        temperature: 0.7
+                        temperature: 0.7,
+                        max_tokens: 200,
+                        chat_template_kwargs: { enable_thinking: false }
                     })
                 });
 
@@ -202,7 +215,10 @@ app.post('/api/chat', async (req, res) => {
             throw new Error(`OpenRouter 可用模型已達安全限制上限或完全崩潰。底層錯誤: ${lastErrorMsg}`);
         }
 
-        triggerAsyncReflection(message, responseText);
+        if (message.trim().length > 4) {
+            triggerAsyncReflection(message, responseText);
+        }
+
         res.json({ reply: responseText });
 
     } catch (error) {
@@ -238,8 +254,9 @@ function triggerAsyncReflection(userMsg, aiReply) {
                 : "  （目前此主題無歷史既留紀錄）";
 
 
-            // 📝 2. 組裝含有既有記憶比對清單的對話上下文中繼包
-            const conversation = `[Existing Long-Term Memories Related to This Topic]\n${existingMemoriesSheet}\n\n[Current Dialogue Turn]\n用戶: "${userMsg}"\nAI: "${aiReply.substring(0, 300)}..."`;
+            // 📝 2. 只提取用戶親口說出的新事實，嚴禁把 AI 的玩笑或腦補存成記憶
+            const conversation = `[Existing Long-Term Memories Related to This Topic]\n${existingMemoriesSheet}\n\n[Current User Input]\n用戶: "${userMsg}"\n\n[Strict Extraction Rules]\n1. Extract ONLY explicit, factual statements directly stated by the User above.\n2. NEVER invent, infer, or combine old memories into new sentences.\n3. If the User only asked a question, greeted, or stated nothing new that isn't already in [Existing Long-Term Memories], output NOTHING.`;
+
 
             // Complete endpoint path: /api/v1/chat/completions
             const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
@@ -255,7 +272,9 @@ function triggerAsyncReflection(userMsg, aiReply) {
                         { role: 'system', content: METACOGNITION_PROMPT },
                         { role: 'user', content: conversation }
                     ],
-                    temperature: 0.2
+                    temperature: 0.1,
+                    max_tokens: 200,
+                    chat_template_kwargs: { enable_thinking: false }
                 })
             });
 
@@ -301,7 +320,8 @@ function triggerAsyncReflection(userMsg, aiReply) {
                         const existingMemories = await recallMemory(currentType, cleanedLine, 10, {
                             throwOnError: true
                         });
-                        const isDuplicate = existingMemories.some(existing =>
+                        const combinedPool = [...allExisting, ...existingMemories];
+                        const isDuplicate = combinedPool.some(existing =>
                             isLikelyDuplicate(cleanedLine, existing.text)
                         );
 

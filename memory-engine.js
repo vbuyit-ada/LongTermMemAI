@@ -15,15 +15,13 @@ let localEmbedderInstance = null;
  * 加載並緩存本地特徵提取模型（all-MiniLM-L6-v2）
  */
 async function getLocalEmbedder() {
-    if (localEmbedderInstance) return localEmbedderInstance;
-    try {
-        const { pipeline } = await import('@xenova/transformers');
-        localEmbedderInstance = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
-        return localEmbedderInstance;
-    } catch (error) {
-        console.error("❌ [Transformers 核心] 加載本地大腦失敗:", error.message);
-        throw error;
+    if (!localEmbedderInstance) {
+        localEmbedderInstance = (async () => {
+            const { pipeline } = await import('@xenova/transformers');
+            return await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', { quantized: true });
+        })();
     }
+    return localEmbedderInstance;
 }
 
 /**
@@ -38,26 +36,25 @@ async function generateVector(text) {
 /**
  * 確保預設資料庫存在，並獲取或建立指定類別的集合 ID
  */
-async function getCollectionIdViaAPI(categoryName) {
-    const databaseName = "default"; 
+const collectionIdCache = {};
 
-    // 在請求集合前，嘗試確保資料庫已實體建立
+async function getCollectionIdViaAPI(categoryName) {
+    const key = categoryName.toLowerCase();
+    if (collectionIdCache[key]) return collectionIdCache[key];
+
+    const databaseName = "default";
+
     try {
-        // Trace URL: \({process.env.CHROMA_BASE_URL}/tenants/\){process.env.CHROMA_TENANT_UUID}/databases
         const createDbUrl = `${CHROMA_BASE_URL}/tenants/${CHROMA_TENANT_UUID}/databases`;
         await fetch(createDbUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name: databaseName })
         });
-    } catch (e) {
-        // 忽略資料庫已存在的報錯，繼續向下執行
-    }
+    } catch (e) {}
 
-    // 物理獲取或建立目標集合
-    // Trace URL: \${process.env.CHROMA_BASE_URL}/tenants/\({process.env.CHROMA_TENANT_UUID}/databases/\){databaseName}/collections
     const url = `${CHROMA_BASE_URL}/tenants/${CHROMA_TENANT_UUID}/databases/${databaseName}/collections`;
-    const collectionName = `${CHROMA_COLLECTION_PREFIX}${categoryName.toLowerCase()}`;
+    const collectionName = `${CHROMA_COLLECTION_PREFIX}${key}`;
 
     const response = await fetch(url, {
         method: "POST",
@@ -70,15 +67,17 @@ async function getCollectionIdViaAPI(categoryName) {
             schema: null
         })
     });
-    
+
     if (!response.ok) {
         const errText = await response.text();
         throw new Error(`無法建立/獲取集合 [${collectionName}] | HTTP 狀態碼: ${response.status} | 核心回應: ${errText}`);
     }
-    
+
     const data = await response.json();
-    return data.id; // 換回該集合在 Docker 內部的實體 UUID 安全通行證
+    collectionIdCache[key] = data.id;
+    return data.id;
 }
+
 
 /**
  * Long Term Memory RETAIN: 物理提取本地向量，並透過 v2 API 寫入 Docker 純向量儲存區
