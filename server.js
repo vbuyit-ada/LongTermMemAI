@@ -175,7 +175,7 @@ app.post('/api/chat', async (req, res) => {
                 const chatData = await response.json();
                 
                 if (chatData && chatData.choices && chatData.choices[0] && chatData.choices[0].message) {
-                    const rawText = chatData.choices[0].message.content;
+                    const rawText = chatData.choices[0].message.content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
                     
                     if (rawText.toLowerCase().includes('user safety') || rawText.trim().toLowerCase() === 'safe') {
                         throw new Error(`模型 [${model}] 吐出殘缺安全審查幻覺字串`);
@@ -268,7 +268,10 @@ function triggerAsyncReflection(userMsg, aiReply) {
             // 🛡️ Step 2 保持運作：寫入背景反思量測日誌
             writeTelemetryLog('REFLECTION', currentModel, data?.usage);
 
-            const reflectionResult = data?.choices?.[0]?.message?.content || "";
+            const rawReflection = data?.choices?.[0]?.message?.content || "";
+            const reflectionResult = rawReflection.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+            console.log("🧠 [背景反思原始輸出]:\n", reflectionResult);
+
             const lines = reflectionResult.split('\n');
             let currentType = null;
 
@@ -278,14 +281,18 @@ function triggerAsyncReflection(userMsg, aiReply) {
                 Observations: 'Observations'
             };
 
-            // Use clean regex patterns without accidental escape characters
+            // Allow optional Markdown (# or *) and case-insensitive matching around section titles
             for (const line of lines) {
                 const trimmedLine = line.trim();
-                const sectionMatch = /^\[(World Facts|Experiences|Observations)\]$/.exec(trimmedLine);
+                const sectionMatch = /^[#*\s]*\[(World Facts|Experiences|Observations)\][#*\s]*$/i.exec(trimmedLine);
                 if (sectionMatch) {
-                    currentType = memoryTypeBySection[sectionMatch[1]];
+                    const matchedKey = Object.keys(memoryTypeBySection).find(
+                        k => k.toLowerCase() === sectionMatch[1].toLowerCase()
+                    );
+                    currentType = memoryTypeBySection[matchedKey];
                     continue;
                 }
+
 
                 const entryMatch = /^[-*]\s+(.+)$/.exec(trimmedLine);
                 if (entryMatch) {
